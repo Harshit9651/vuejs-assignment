@@ -12,7 +12,11 @@ const io = new Server(server);
 
 const session = require("express-session")
 const cors = require('cors');
-app.use(cors());
+app.use(cors({
+    origin: 'http://localhost:8080', // Update this with the correct front-end URL
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type'],
+  }));
 const bodyParser = require('body-parser');
 app.use(bodyParser.json()); 
 app.use(bodyParser.urlencoded({ extended: true }));
