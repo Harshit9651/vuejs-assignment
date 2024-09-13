@@ -1,12 +1,15 @@
 <template>
-  <div>
-    <div>
-      <!-- Buttons for adding shapes and changing background -->
-      <button @click="addCircle">Add Circle</button>
-      <button @click="addTriangle">Add Triangle</button>
-      <button @click="addLine">Add Line</button>
-      <button @click="uploadImage">Upload Image</button>
-      <button @click="downloadCanvas">Download Canvas</button>
+  <div class="whiteboard-container">
+    <div class="toolbar">
+      <input v-model="room" class="room-input" placeholder="Enter room name" />
+      <button class="toolbar-button" @click="joinRoom">Join Room</button>
+      <button class="toolbar-button" @click="setDrawingMode('pencil')">Pencil</button>
+      <button class="toolbar-button" @click="setDrawingMode('rectangle')">Rectangle</button>
+      <button class="toolbar-button" @click="setDrawingMode('circle')">Circle</button>
+      <button class="toolbar-button" @click="setDrawingMode('line')">Line</button>
+      <input type="color" v-model="strokeColor" class="color-picker" />
+      <button class="toolbar-button" @click="uploadImage">Upload Image</button>
+      <button class="toolbar-button" @click="downloadCanvas">Download Canvas</button>
       <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none;" />
     </div>
     <canvas id="canvas"></canvas>
@@ -23,6 +26,9 @@ export default {
     return {
       socket: null,
       canvas: null,
+      room: '', // To store the room name
+      strokeColor: '#000000', // Default stroke color
+      drawingMode: 'pencil', // Default drawing mode
     };
   },
   mounted() {
@@ -31,60 +37,102 @@ export default {
       transports: ['websocket', 'polling'],
     });
 
-    // Handle socket connection errors
     this.socket.on('connect_error', (err) => {
       console.error('Socket connection error:', err);
     });
 
-    // Initialize Fabric.js canvas
+    // Initialize fabric.js canvas
     this.canvas = new fabric.Canvas('canvas', {
-      width: 500,
+      width: 800,
       height: 500,
-      backgroundColor: '',
+      backgroundColor: 'white',
+      isDrawingMode: true,
     });
 
-    // Load a default image and make it draggable
-    fabric.Image.fromURL('https://images.pexels.com/photos/21369699/pexels-photo-21369699/free-photo-of-newspaper-on-a-table-in-a-ferry.jpeg?auto=compress&cs=tinysrgb&w=600&lazy=load', (img) => {
-      img.set({
-        left: 100,
-        top: 100,
-        angle: 0,
-        editable: true,
+    // Set up free drawing brush properties
+    this.canvas.freeDrawingBrush = new fabric.PencilBrush(this.canvas);
+    this.canvas.freeDrawingBrush.color = this.strokeColor;
+    this.canvas.freeDrawingBrush.width = 2;
+
+    // Listen for drawing data from other users
+    this.socket.on('drawing', (data) => {
+      fabric.util.enlivenObjects([data], (objects) => {
+        objects.forEach((obj) => {
+          this.canvas.add(obj);
+        });
+        this.canvas.renderAll();
       });
-      img.scaleToWidth(150);
-      this.canvas.add(img);
-      this.canvas.renderAll();
     });
+
+    // Synchronize canvas changes across all clients in the same room
+    this.canvas.on('object:modified', this.sendCanvasData);
+    this.canvas.on('object:added', this.sendCanvasData);
+  },
+  watch: {
+    strokeColor(newColor) {
+      if (this.canvas.freeDrawingBrush) {
+        this.canvas.freeDrawingBrush.color = newColor;
+      }
+    },
   },
   methods: {
-    addCircle() {
-      const circle = new fabric.Circle({
-        radius: 50,
-        fill: 'blue',
-        left: 100,
-        top: 100,
-        selectable: true,
-      });
-      this.canvas.add(circle);
+    joinRoom() {
+      if (this.room.trim()) {
+        this.socket.emit('joinRoom', this.room);
+        alert(`Joined room: ${this.room}`);
+      } else {
+        alert('Please enter a room name.');
+      }
     },
-    addTriangle() {
-      const triangle = new fabric.Triangle({
-        width: 100,
-        height: 100,
-        fill: 'green',
-        left: 150,
-        top: 150,
-        selectable: true,
-      });
-      this.canvas.add(triangle);
+    setDrawingMode(mode) {
+      this.drawingMode = mode;
+
+      if (mode === 'pencil') {
+        this.canvas.isDrawingMode = true;
+        this.canvas.selection = false;
+        this.canvas.forEachObject((o) => (o.selectable = false));
+      } else {
+        this.canvas.isDrawingMode = false;
+        this.addShape(mode);
+      }
     },
-    addLine() {
-      const line = new fabric.Line([50, 50, 200, 200], {
-        stroke: 'black',
-        strokeWidth: 5,
-        selectable: true,
-      });
-      this.canvas.add(line);
+    addShape(shape) {
+      let obj;
+      switch (shape) {
+        case 'rectangle':
+          obj = new fabric.Rect({
+            left: 100,
+            top: 100,
+            fill: 'transparent',
+            stroke: this.strokeColor,
+            strokeWidth: 2,
+            width: 100,
+            height: 100,
+          });
+          break;
+        case 'circle':
+          obj = new fabric.Circle({
+            left: 100,
+            top: 100,
+            radius: 50,
+            fill: 'transparent',
+            stroke: this.strokeColor,
+            strokeWidth: 2,
+          });
+          break;
+        case 'line':
+          obj = new fabric.Line([50, 50, 200, 200], {
+            stroke: this.strokeColor,
+            strokeWidth: 2,
+          });
+          break;
+      }
+      if (obj) {
+        this.canvas.add(obj);
+        this.canvas.setActiveObject(obj);
+        this.canvas.renderAll();
+        this.sendCanvasData();
+      }
     },
     uploadImage() {
       this.$refs.fileInput.click();
@@ -115,14 +163,67 @@ export default {
       link.download = 'canvas.png';
       link.click();
     },
+    sendCanvasData() {
+      const obj = this.canvas.getObjects().slice(-1)[0].toObject();
+      this.socket.emit('drawing', obj);
+    },
   },
 };
 </script>
 
 <style scoped>
+.whiteboard-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.room-input {
+  padding: 8px;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  font-size: 16px;
+  width: 200px;
+}
+
+.toolbar-button {
+  padding: 8px 12px;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s;
+}
+
+.toolbar-button:hover {
+  background-color: #45a049;
+}
+
+.color-picker {
+  padding: 4px;
+  border-radius: 4px;
+  border: 2px solid #ccc;
+  cursor: pointer;
+}
+
 #canvas {
   width: 100%;
   height: 500px;
-  border: 1px solid #000; /* Optional: Add border for better visibility */
+  border: 2px solid #4caf50;
+  background-color: white;
+  border-radius: 4px;
 }
 </style>
