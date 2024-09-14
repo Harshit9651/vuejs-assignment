@@ -1,74 +1,90 @@
 const express = require('express');
-const dotenv = require('dotenv');
-dotenv.config();
-const app = express();
-const port = process.env.PORT || 3000;
 const http = require('http');
 const { Server } = require('socket.io');
+const dotenv = require('dotenv');
+dotenv.config();
 
+const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// In-memory storage for room users
+const PORT = process.env.PORT || 3000;
+
+// In-memory storage for room users and cursor positions
 const usersInRoom = {};
+const userCursorPositions = {};
 
 io.on('connection', (socket) => {
-  console.log('A user connected');
+  console.log('A user connected', socket.id);
 
-  // Store room name for each socket to prevent multiple joins
-  let room = null;
-
-  socket.on('joinRoom', (newRoom) => {
-    console.log(`Received joinRoom request for: ${typeof newRoom} - ${newRoom}`);
-    
-    // Ensure newRoom is a string
-    if (typeof newRoom !== 'string') {
-      console.error(`Invalid room name received: ${newRoom}`);
+  // Handle joining a room
+  socket.on('joinRoom', (room) => {
+    if (typeof room !== 'string') {
+      console.error(`Invalid room name received: ${room}`);
       return;
     }
 
-    if (room !== newRoom) {
-      if (room) {
-        socket.leave(room); // Leave the previous room, if any
-        console.log(`User ${socket.id} left room: ${room}`);
-      }
+    // Handle room change
+    if (socket.room && socket.room !== room) {
+      socket.leave(socket.room);
+      console.log(`User ${socket.id} left room: ${socket.room}`);
+    }
 
-      room = newRoom;
-      socket.join(room);
-      socket.room = room; // Update the socket object with the new room name
-      console.log(`User ${socket.id} joined room: ${room}`);
+    socket.room = room;
+    socket.join(room);
+    console.log(`User ${socket.id} joined room: ${room}`);
 
-      if (!usersInRoom[room]) {
-        usersInRoom[room] = [];
-      }
+    // Update and emit users in the room
+    usersInRoom[room] = usersInRoom[room] || [];
+    if (!usersInRoom[room].includes(socket.id)) {
       usersInRoom[room].push(socket.id);
-
-      io.to(room).emit('usersInRoom', usersInRoom[room]); // Emit updated users in the room
     }
+    io.to(room).emit('usersInRoom', usersInRoom[room]);
   });
 
-  // When a message is sent, broadcast it only to the room the user is in
-  socket.on('chatMessage', (msg) => {
-    if (room) {
-      console.log(`Message received in room ${room}: ${msg.text}`);
-      io.to(room).emit('chatMessage', { sender: socket.id, text: msg.text }); // Send message to the room
-    }
-  });
-
+  // Handle mouse movement
   socket.on('mouseMove', (data) => {
-    socket.to(data.room).emit('mouseMove', data);
+    if (data.room) {
+      userCursorPositions[data.userId] = { x: data.x, y: data.y, userName: data.userName };
+      io.to(data.room).emit('mouseMove', { ...data, users: userCursorPositions });
+    }
   });
 
-  // On disconnect, remove the user from the room
-  socket.on('disconnect', () => {
-    if (room && usersInRoom[room]) {
-      usersInRoom[room] = usersInRoom[room].filter((id) => id !== socket.id);
-      console.log(`User ${socket.id} disconnected from room: ${room}`);
-      io.to(room).emit('usersInRoom', usersInRoom[room]); // Emit updated users in the room
+  // Handle drawing events
+  socket.on('drawing', (data) => {
+    if (data.room) {
+      io.to(data.room).emit('drawing', data);
     }
+  });
+
+  // Handle chat messages
+  socket.on('chatMessage', (msg) => {
+    if (socket.room) {
+      io.to(socket.room).emit('chatMessage', { sender: socket.id, text: msg.text });
+    }
+  });
+
+  // Handle chat start requests
+  socket.on('chatStart', (chatData) => {
+    if (chatData.chatWith) {
+      io.to(chatData.chatWith).emit('chatStart', { userId: socket.id, chatWith: chatData.chatWith });
+    }
+  });
+
+  // Handle user disconnection
+  socket.on('disconnect', () => {
+    if (socket.room) {
+      usersInRoom[socket.room] = usersInRoom[socket.room].filter(id => id !== socket.id);
+      io.to(socket.room).emit('usersInRoom', usersInRoom[socket.room]);
+
+      // Clean up user cursor position
+      delete userCursorPositions[socket.id];
+      io.to(socket.room).emit('mouseMove', { users: userCursorPositions });
+    }
+    console.log('Client disconnected', socket.id);
   });
 });
 
-server.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+server.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
