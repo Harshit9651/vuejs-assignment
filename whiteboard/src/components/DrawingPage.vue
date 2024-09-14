@@ -221,9 +221,15 @@ export default {
       this.socket.emit('joinRoom', this.room);
     },
     sendCanvasData(type, e) {
-      const object = e.target.toObject(['id']);
-      this.socket.emit('drawing', { type, object, room: this.room });
-    },
+  // Ensure e.target exists and has a toObject method
+  if (e.target && typeof e.target.toObject === 'function') {
+    const object = e.target.toObject(['id']);
+    this.socket.emit('drawing', { type, object, room: this.room });
+  } else {
+    console.warn("No target object or object doesn't support toObject");
+  }
+}
+,
     saveState() {
       const state = JSON.stringify(this.canvas.toDatalessJSON());
       this.history.push(state);
@@ -249,7 +255,7 @@ export default {
     },
     sendMessage() {
       const messageData = {
-        user: 'User', // You can replace it with dynamic usernames later
+        user: 'User', 
         text: this.chatMessage,
         room: this.room,
       };
