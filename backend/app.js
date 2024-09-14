@@ -19,6 +19,14 @@ io.on('connection', (socket) => {
   let room = null;
 
   socket.on('joinRoom', (newRoom) => {
+    console.log(`Received joinRoom request for: ${typeof newRoom} - ${newRoom}`);
+    
+    // Ensure newRoom is a string
+    if (typeof newRoom !== 'string') {
+      console.error(`Invalid room name received: ${newRoom}`);
+      return;
+    }
+
     if (room !== newRoom) {
       if (room) {
         socket.leave(room); // Leave the previous room, if any
@@ -45,6 +53,10 @@ io.on('connection', (socket) => {
       console.log(`Message received in room ${room}: ${msg.text}`);
       io.to(room).emit('chatMessage', { sender: socket.id, text: msg.text }); // Send message to the room
     }
+  });
+
+  socket.on('mouseMove', (data) => {
+    socket.to(data.room).emit('mouseMove', data);
   });
 
   // On disconnect, remove the user from the room

@@ -38,7 +38,6 @@
     </div>
   </div>
 </template>
-
 <script>
 import { io } from 'socket.io-client';
 import * as fabric from 'fabric';
@@ -49,7 +48,7 @@ export default {
     return {
       socket: null,
       canvas: null,
-      room: '',
+      room: '', // This should be a string representing the room name
       strokeColor: '#000000',
       drawingMode: 'pencil',
       backgroundColor: '#ffffff',
@@ -57,6 +56,9 @@ export default {
       historyIndex: -1,
       chatMessage: '',
       chatMessages: [],
+      userId: 'User_' + Math.random().toString(36).substr(2, 9), // Random user ID
+      userName: 'User',
+      users: {}, // Store other users' cursors and names
     };
   },
   mounted() {
@@ -79,6 +81,7 @@ export default {
     this.canvas.freeDrawingBrush.color = this.strokeColor;
     this.canvas.freeDrawingBrush.width = 2;
 
+    // Listen for other users' drawing movements
     this.socket.on('drawing', (data) => {
       if (data && data.type && data.object) {
         fabric.util.enlivenObjects([data.object], (objects) => {
@@ -97,12 +100,40 @@ export default {
       }
     });
 
+    // Listen for cursor movements of other users
+    this.socket.on('mouseMove', (data) => {
+      if (data.userId !== this.userId) {
+        this.users[data.userId] = {
+          x: data.x,
+          y: data.y,
+          userName: data.userName,
+        };
+        this.renderUsers();
+      }
+    });
+
+    // Receive chat messages
     this.socket.on('chatMessage', (messageData) => {
       this.chatMessages.push(messageData);
     });
 
+    // Emit drawing data when object is modified or added
     this.canvas.on('object:modified', (e) => this.sendCanvasData('object:modified', e));
     this.canvas.on('object:added', (e) => this.sendCanvasData('object:added', e));
+
+    // Track mouse movement and broadcast
+    this.canvas.on('mouse:move', (e) => {
+      if (e.pointer) {
+        this.socket.emit('mouseMove', {
+          x: e.pointer.x,
+          y: e.pointer.y,
+          userId: this.userId,
+          userName: this.userName,
+          room: this.room,
+        });
+      }
+    });
+
     this.saveState();
   },
   methods: {
@@ -218,28 +249,36 @@ export default {
       link.click();
     },
     joinRoom() {
-      this.socket.emit('joinRoom', this.room);
+      if (typeof this.room === 'string') {
+        this.socket.emit('joinRoom', this.room); // Emit the room name directly as a string
+      } else {
+        console.error('Invalid room name');
+      }
     },
     sendCanvasData(type, e) {
-  // Ensure e.target exists and has a toObject method
-  if (e.target && typeof e.target.toObject === 'function') {
-    const object = e.target.toObject(['id']);
-    this.socket.emit('drawing', { type, object, room: this.room });
+  const obj = e.target ? e.target.toObject(['id']) : null;
+  if (obj) {
+    this.socket.emit('drawing', {
+      type,
+      object: obj,
+      room: this.room,
+    });
   } else {
-    console.warn("No target object or object doesn't support toObject");
+    console.error('Object is not defined');
   }
 }
 ,
     saveState() {
-      const state = JSON.stringify(this.canvas.toDatalessJSON());
-      this.history.push(state);
-      this.historyIndex++;
+      const json = JSON.stringify(this.canvas.toDatalessJSON());
+      if (this.historyIndex === this.history.length - 1) {
+        this.history.push(json);
+        this.historyIndex++;
+      }
     },
     undo() {
       if (this.historyIndex > 0) {
         this.historyIndex--;
-        const state = this.history[this.historyIndex];
-        this.canvas.loadFromJSON(state, () => {
+        this.canvas.loadFromJSON(this.history[this.historyIndex], () => {
           this.canvas.renderAll();
         });
       }
@@ -247,24 +286,83 @@ export default {
     redo() {
       if (this.historyIndex < this.history.length - 1) {
         this.historyIndex++;
-        const state = this.history[this.historyIndex];
-        this.canvas.loadFromJSON(state, () => {
+        this.canvas.loadFromJSON(this.history[this.historyIndex], () => {
           this.canvas.renderAll();
         });
       }
     },
+    renderUsers() {
+    // Clear the top context where we will render user cursors
+    this.canvas.clearContext(this.canvas.contextTop);
+
+    // Iterate over users and update their cursor positions
+    for (const userId in this.users) {
+      const user = this.users[userId];
+      
+      // Check if the user already has a cursor indicator
+      let cursor = this.canvas.getObjects().find(o => o.type === 'circle' && o.userId === userId);
+      if (!cursor) {
+        // Create a new cursor if it doesn't exist
+        cursor = new fabric.Circle({
+          left: user.x,
+          top: user.y,
+          radius: 5,
+          fill: 'blue',
+          originX: 'center',
+          originY: 'center',
+          userId: userId, // Custom property to track userId
+        });
+        this.canvas.add(cursor);
+      } else {
+        // Update the position of the existing cursor
+        cursor.set({
+          left: user.x,
+          top: user.y,
+        });
+      }
+
+      // Check if the user's name text exists
+      let nameText = this.canvas.getObjects().find(o => o.type === 'text' && o.userId === userId);
+      if (!nameText) {
+        // Create new text if it doesn't exist
+        nameText = new fabric.Text(user.userName, {
+          left: user.x + 10,
+          top: user.y - 10,
+          fontSize: 12,
+          fill: 'black',
+          userId: userId, // Custom property to track userId
+        });
+        this.canvas.add(nameText);
+      } else {
+        // Update the position of the existing text
+        nameText.set({
+          left: user.x + 10,
+          top: user.y - 10,
+          text: user.userName,
+        });
+      }
+    }
+
+    // Render all the objects on the canvas
+    this.canvas.renderAll();
+  },
     sendMessage() {
-      const messageData = {
-        user: 'User', 
-        text: this.chatMessage,
-        room: this.room,
-      };
-      this.socket.emit('chatMessage', messageData);
-      this.chatMessage = '';
+      if (this.chatMessage.trim() !== '') {
+        const messageData = {
+          text: this.chatMessage,
+          user: this.userName,
+          room: this.room,
+        };
+        this.socket.emit('chatMessage', messageData);
+        this.chatMessages.push(messageData);
+        this.chatMessage = '';
+      }
     },
   },
 };
 </script>
+
+
 <style scoped>
 .whiteboard-container {
   display: flex;
