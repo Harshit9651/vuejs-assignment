@@ -7,12 +7,35 @@
       <button class="toolbar-button" @click="setDrawingMode('rectangle')">Rectangle</button>
       <button class="toolbar-button" @click="setDrawingMode('circle')">Circle</button>
       <button class="toolbar-button" @click="setDrawingMode('line')">Line</button>
+      <button class="toolbar-button" @click="setDrawingMode('text')">Text</button>
       <input type="color" v-model="strokeColor" class="color-picker" />
       <button class="toolbar-button" @click="uploadImage">Upload Image</button>
+      <button class="toolbar-button" @click="undo">Undo</button>
+      <button class="toolbar-button" @click="redo">Redo</button>
+      <input type="color" v-model="backgroundColor" class="color-picker" />
       <button class="toolbar-button" @click="downloadCanvas">Download Canvas</button>
       <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none;" />
     </div>
-    <canvas id="canvas"></canvas>
+
+    <div class="content">
+      <canvas id="canvas"></canvas>
+      <div class="chat-container">
+        <div class="chat-header">Chat Room</div>
+        <div class="chat-messages">
+          <div
+            v-for="message in chatMessages"
+            :key="message.id"
+            :class="{'chat-message sender': message.user === 'User', 'chat-message receiver': message.user !== 'User'}"
+          >
+            <strong>{{ message.user }}:</strong> {{ message.text }}
+          </div>
+        </div>
+        <div class="chat-input">
+          <input v-model="chatMessage" placeholder="Type a message..." @keyup.enter="sendMessage" />
+          <button @click="sendMessage">Send</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -26,13 +49,17 @@ export default {
     return {
       socket: null,
       canvas: null,
-      room: '', // To store the room name
-      strokeColor: '#000000', // Default stroke color
-      drawingMode: 'pencil', // Default drawing mode
+      room: '',
+      strokeColor: '#000000',
+      drawingMode: 'pencil',
+      backgroundColor: '#ffffff',
+      history: [],
+      historyIndex: -1,
+      chatMessage: '',
+      chatMessages: [],
     };
   },
   mounted() {
-    // Initialize socket connection
     this.socket = io('http://localhost:3000', {
       transports: ['websocket', 'polling'],
     });
@@ -41,7 +68,6 @@ export default {
       console.error('Socket connection error:', err);
     });
 
-    // Initialize fabric.js canvas
     this.canvas = new fabric.Canvas('canvas', {
       width: 800,
       height: 500,
@@ -49,52 +75,51 @@ export default {
       isDrawingMode: true,
     });
 
-    // Set up free drawing brush properties
     this.canvas.freeDrawingBrush = new fabric.PencilBrush(this.canvas);
     this.canvas.freeDrawingBrush.color = this.strokeColor;
     this.canvas.freeDrawingBrush.width = 2;
 
-    // Listen for drawing data from other users
     this.socket.on('drawing', (data) => {
-      fabric.util.enlivenObjects([data], (objects) => {
-        objects.forEach((obj) => {
-          this.canvas.add(obj);
+      if (data && data.type && data.object) {
+        fabric.util.enlivenObjects([data.object], (objects) => {
+          objects.forEach((obj) => {
+            if (data.type === 'object:added') {
+              this.canvas.add(obj);
+            } else if (data.type === 'object:modified') {
+              const existingObj = this.canvas.getObjects().find(o => o.id === data.object.id);
+              if (existingObj) {
+                existingObj.set(obj);
+              }
+            }
+            this.canvas.renderAll();
+          });
         });
-        this.canvas.renderAll();
-      });
+      }
     });
 
-    // Synchronize canvas changes across all clients in the same room
-    this.canvas.on('object:modified', this.sendCanvasData);
-    this.canvas.on('object:added', this.sendCanvasData);
-  },
-  watch: {
-    strokeColor(newColor) {
-      if (this.canvas.freeDrawingBrush) {
-        this.canvas.freeDrawingBrush.color = newColor;
-      }
-    },
+    this.socket.on('chatMessage', (messageData) => {
+      this.chatMessages.push(messageData);
+    });
+
+    this.canvas.on('object:modified', (e) => this.sendCanvasData('object:modified', e));
+    this.canvas.on('object:added', (e) => this.sendCanvasData('object:added', e));
+    this.saveState();
   },
   methods: {
-    joinRoom() {
-      if (this.room.trim()) {
-        this.socket.emit('joinRoom', this.room);
-        alert(`Joined room: ${this.room}`);
-      } else {
-        alert('Please enter a room name.');
-      }
-    },
     setDrawingMode(mode) {
       this.drawingMode = mode;
-
       if (mode === 'pencil') {
         this.canvas.isDrawingMode = true;
         this.canvas.selection = false;
         this.canvas.forEachObject((o) => (o.selectable = false));
+      } else if (mode === 'text') {
+        this.canvas.isDrawingMode = false;
+        this.addText();
       } else {
         this.canvas.isDrawingMode = false;
         this.addShape(mode);
       }
+      this.saveState();
     },
     addShape(shape) {
       let obj;
@@ -108,6 +133,7 @@ export default {
             strokeWidth: 2,
             width: 100,
             height: 100,
+            id: `rect_${Date.now()}`,
           });
           break;
         case 'circle':
@@ -118,12 +144,14 @@ export default {
             fill: 'transparent',
             stroke: this.strokeColor,
             strokeWidth: 2,
+            id: `circ_${Date.now()}`,
           });
           break;
         case 'line':
           obj = new fabric.Line([50, 50, 200, 200], {
             stroke: this.strokeColor,
             strokeWidth: 2,
+            id: `line_${Date.now()}`,
           });
           break;
       }
@@ -131,8 +159,29 @@ export default {
         this.canvas.add(obj);
         this.canvas.setActiveObject(obj);
         this.canvas.renderAll();
-        this.sendCanvasData();
+        this.saveState();
+        this.sendCanvasData('object:added', { object: obj });
       }
+    },
+    addText() {
+      const text = new fabric.Textbox('', {
+        left: 100,
+        top: 100,
+        fontSize: 20,
+        fill: this.strokeColor,
+        editable: true,
+        id: `text_${Date.now()}`,
+      });
+
+      this.canvas.add(text);
+      this.canvas.setActiveObject(text);
+      this.canvas.renderAll();
+
+      text.enterEditing();
+      text.hiddenTextarea.focus();
+
+      this.saveState();
+      this.sendCanvasData('object:added', { object: text });
     },
     uploadImage() {
       this.$refs.fileInput.click();
@@ -144,10 +193,15 @@ export default {
         reader.onload = (e) => {
           const dataURL = e.target.result;
           fabric.Image.fromURL(dataURL, (img) => {
-            this.canvas.setBackgroundImage(img, this.canvas.renderAll.bind(this.canvas), {
-              scaleX: this.canvas.width / img.width,
-              scaleY: this.canvas.height / img.height,
-            });
+            this.canvas.setBackgroundImage(
+              img,
+              this.canvas.renderAll.bind(this.canvas),
+              {
+                scaleX: this.canvas.width / img.width,
+                scaleY: this.canvas.height / img.height,
+              }
+            );
+            this.saveState();
           });
         };
         reader.readAsDataURL(file);
@@ -156,55 +210,80 @@ export default {
     downloadCanvas() {
       const dataURL = this.canvas.toDataURL({
         format: 'png',
-        quality: 1.0,
+        multiplier: 2,
       });
       const link = document.createElement('a');
       link.href = dataURL;
       link.download = 'canvas.png';
       link.click();
     },
-    sendCanvasData() {
-      const obj = this.canvas.getObjects().slice(-1)[0].toObject();
-      this.socket.emit('drawing', obj);
+    joinRoom() {
+      this.socket.emit('joinRoom', this.room);
+    },
+    sendCanvasData(type, e) {
+      const object = e.target.toObject(['id']);
+      this.socket.emit('drawing', { type, object, room: this.room });
+    },
+    saveState() {
+      const state = JSON.stringify(this.canvas.toDatalessJSON());
+      this.history.push(state);
+      this.historyIndex++;
+    },
+    undo() {
+      if (this.historyIndex > 0) {
+        this.historyIndex--;
+        const state = this.history[this.historyIndex];
+        this.canvas.loadFromJSON(state, () => {
+          this.canvas.renderAll();
+        });
+      }
+    },
+    redo() {
+      if (this.historyIndex < this.history.length - 1) {
+        this.historyIndex++;
+        const state = this.history[this.historyIndex];
+        this.canvas.loadFromJSON(state, () => {
+          this.canvas.renderAll();
+        });
+      }
+    },
+    sendMessage() {
+      const messageData = {
+        user: 'User', // You can replace it with dynamic usernames later
+        text: this.chatMessage,
+        room: this.room,
+      };
+      this.socket.emit('chatMessage', messageData);
+      this.chatMessage = '';
     },
   },
 };
 </script>
-
 <style scoped>
 .whiteboard-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px;
-  background-color: #f5f5f5;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .toolbar {
+  margin-bottom: 10px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.room-input {
-  padding: 8px;
-  border: 2px solid #ccc;
-  border-radius: 4px;
-  font-size: 16px;
-  width: 200px;
+  justify-content: space-around;
+  width: 100%;
+  background-color: #f4f4f4;
+  padding: 10px;
+  border-radius: 10px;
 }
 
 .toolbar-button {
-  padding: 8px 12px;
-  background-color: #4caf50;
+  margin: 0 5px;
+  padding: 8px 15px;
+  background-color: #4CAF50;
   color: white;
   border: none;
-  border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  border-radius: 5px;
   transition: background-color 0.3s;
 }
 
@@ -213,17 +292,99 @@ export default {
 }
 
 .color-picker {
-  padding: 4px;
-  border-radius: 4px;
-  border: 2px solid #ccc;
-  cursor: pointer;
+  margin-left: 5px;
+}
+
+.content {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
 #canvas {
-  width: 100%;
-  height: 500px;
-  border: 2px solid #4caf50;
+  border: 1px solid #ddd;
+  margin-right: 20px;
+  border-radius: 10px;
+  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.chat-container {
+  width: 300px;
+  max-height: 500px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
   background-color: white;
-  border-radius: 4px;
+  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.chat-header {
+  background-color: #4CAF50;
+  color: white;
+  padding: 15px;
+  text-align: center;
+  font-weight: bold;
+  border-radius: 10px 10px 0 0;
+}
+
+.chat-messages {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-message {
+  max-width: 70%;
+  padding: 10px 15px;
+  border-radius: 20px;
+  word-wrap: break-word;
+  font-size: 14px;
+}
+
+.chat-message.sender {
+  align-self: flex-end;
+  background-color: #dcf8c6;
+  color: #333;
+}
+
+.chat-message.receiver {
+  align-self: flex-start;
+  background-color: #f1f0f0;
+  color: #333;
+}
+
+.chat-input {
+  display: flex;
+  padding: 10px;
+  background-color: #f4f4f4;
+  border-radius: 0 0 10px 10px;
+}
+
+.chat-input input {
+  flex-grow: 1;
+  padding: 10px;
+  font-size: 14px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+  outline: none;
+  margin-right: 10px;
+}
+
+.chat-input button {
+  padding: 8px 15px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.chat-input button:hover {
+  background-color: #45a049;
 }
 </style>
