@@ -1,61 +1,62 @@
-const express = require("express");
+const express = require('express');
 const dotenv = require('dotenv');
 dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
-const path = require("path");
 const http = require('http');
 const { Server } = require('socket.io');
 
 const server = http.createServer(app);
 const io = new Server(server);
 
-const session = require("express-session");
-const cors = require('cors');
-
-app.use(cors({
-    origin: 'http://localhost:8080', // Update this with the correct front-end URL
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type'],
-}));
-
-const bodyParser = require('body-parser');
-app.use(bodyParser.json()); 
-app.use(bodyParser.urlencoded({ extended: true }));
-
-require('./connections/connection');
-
-const UserRoute = require('./routes/userroutes');
-app.use('/User', UserRoute);
-
-app.post('/user', (req, res) => {
-    const { name, email, password } = req.body;
-    console.log('Received data:', name, email, password);
-});
+// In-memory storage for room users
+const usersInRoom = {};
 
 io.on('connection', (socket) => {
-    console.log('A user connected');
-  
-    socket.on('joinRoom', (room) => {
-        socket.join(room);
-        console.log(`User joined room: ${room}`);
-    });
-  
-    socket.on('drawing', (data) => {
-        // Broadcast to all clients in the same room
-        socket.to(data.room).emit('drawing', data);
-    });
+  console.log('A user connected');
 
-    socket.on('chatMessage', (data) => {
-        io.to(data.room).emit('chatMessage', data);
-    });
+  // Store room name for each socket to prevent multiple joins
+  let room = null;
 
-    // Handle disconnection
-    socket.on('disconnect', () => {
-        console.log('A user disconnected');
-    });
+  socket.on('joinRoom', (newRoom) => {
+    if (room !== newRoom) {
+      if (room) {
+        socket.leave(room); // Leave the previous room, if any
+        console.log(`User ${socket.id} left room: ${room}`);
+      }
+
+      room = newRoom;
+      socket.join(room);
+      socket.room = room; // Update the socket object with the new room name
+      console.log(`User ${socket.id} joined room: ${room}`);
+
+      if (!usersInRoom[room]) {
+        usersInRoom[room] = [];
+      }
+      usersInRoom[room].push(socket.id);
+
+      io.to(room).emit('usersInRoom', usersInRoom[room]); // Emit updated users in the room
+    }
+  });
+
+  // When a message is sent, broadcast it only to the room the user is in
+  socket.on('chatMessage', (msg) => {
+    if (room) {
+      console.log(`Message received in room ${room}: ${msg.text}`);
+      io.to(room).emit('chatMessage', { sender: socket.id, text: msg.text }); // Send message to the room
+    }
+  });
+
+  // On disconnect, remove the user from the room
+  socket.on('disconnect', () => {
+    if (room && usersInRoom[room]) {
+      usersInRoom[room] = usersInRoom[room].filter((id) => id !== socket.id);
+      console.log(`User ${socket.id} disconnected from room: ${room}`);
+      io.to(room).emit('usersInRoom', usersInRoom[room]); // Emit updated users in the room
+    }
+  });
 });
-  
+
 server.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+  console.log(`Server is running on http://localhost:${port}`);
 });
