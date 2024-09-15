@@ -49,7 +49,6 @@ export default {
       room: '',
       strokeColor: '#000000',
       drawingMode: 'pencil',
-      backgroundColor: '#ffffff',
       history: [],
       historyIndex: -1,
       chatMessage: '',
@@ -58,7 +57,8 @@ export default {
       userName: 'User',
       users: {},
     };
-  },mounted() {
+  },
+  mounted() {
   this.socket = io('http://localhost:3000', {
     transports: ['websocket', 'polling'],
   });
@@ -108,6 +108,7 @@ export default {
         y: data.y,
         userName: data.userName,
       };
+      this.renderUsers(); // Update the canvas with cursor positions
     }
   });
 
@@ -143,7 +144,8 @@ export default {
 
   // Save initial state
   this.saveState();
-},
+}
+,
   methods: {
     joinRoom() {
       if (this.room) {
@@ -164,7 +166,8 @@ export default {
         this.addShape(mode);
       }
       this.saveState();
-    }, addShape(shape) {
+    },
+    addShape(shape) {
       let obj;
       switch (shape) {
         case 'rectangle':
@@ -252,22 +255,25 @@ export default {
       link.download = 'canvas.png';
       link.click();
     },
-    asData(type, e) {
-  const obj = e.target ? e.target.toObject(['id']) : null;
-  if (obj) {
-    this.socket.emit('drawing', {
-      type,
-      object: obj,
-      room: this.room,
-    });
-  } else {
-    console.error('Object is not defined');
-  }
-}
-,
+    sendCanvasData(type, e) {
+      const obj = e.target ? e.target.toObject(['id']) : null;
+      if (obj) {
+        this.socket.emit('drawing', {
+          type,
+          object: obj,
+          room: this.room,
+        });
+      } else {
+        console.error('Object is not defined');
+      }
+    },
     saveState() {
       const json = JSON.stringify(this.canvas.toDatalessJSON());
       if (this.historyIndex === this.history.length - 1) {
+        this.history.push(json);
+        this.historyIndex++;
+      } else {
+        this.history = this.history.slice(0, this.historyIndex + 1);
         this.history.push(json);
         this.historyIndex++;
       }
@@ -275,97 +281,64 @@ export default {
     undo() {
       if (this.historyIndex > 0) {
         this.historyIndex--;
-        this.canvas.loadFromJSON(this.history[this.historyIndex], () => {
-          this.canvas.renderAll();
-        });
+        this.loadState(this.history[this.historyIndex]);
       }
     },
     redo() {
       if (this.historyIndex < this.history.length - 1) {
         this.historyIndex++;
-        this.canvas.loadFromJSON(this.history[this.historyIndex], () => {
-          this.canvas.renderAll();
-        });
+        this.loadState(this.history[this.historyIndex]);
       }
     },
-    renderUsers() {
-    // Clear the top context where we will render user cursors
-    this.canvas.clearContext(this.canvas.contextTop);
-
-    // Iterate over users and update their cursor positions
-    for (const userId in this.users) {
-      const user = this.users[userId];
-      
-      // Check if the user already has a cursor indicator
-      let cursor = this.canvas.getObjects().find(o => o.type === 'circle' && o.userId === userId);
-      if (!cursor) {
-        // Create a new cursor if it doesn't exist
-        cursor = new fabric.Circle({
-          left: user.x,
-          top: user.y,
-          radius: 5,
-          fill: 'blue',
-          originX: 'center',
-          originY: 'center',
-          userId: userId, // Custom property to track userId
-        });
-        this.canvas.add(cursor);
-      } else {
-        // Update the position of the existing cursor
-        cursor.set({
-          left: user.x,
-          top: user.y,
-        });
-      }
-
-      // Check if the user's name text exists
-      let nameText = this.canvas.getObjects().find(o => o.type === 'text' && o.userId === userId);
-      if (!nameText) {
-        // Create new text if it doesn't exist
-        nameText = new fabric.Text(user.userName, {
-          left: user.x + 10,
-          top: user.y - 10,
-          fontSize: 12,
-          fill: 'black',
-          userId: userId, // Custom property to track userId
-        });
-        this.canvas.add(nameText);
-      } else {
-        // Update the position of the existing text
-        nameText.set({
-          left: user.x + 10,
-          top: user.y - 10,
-          text: user.userName,
-        });
-      }
-    }
-
-    // Render all the objects on the canvas
-    this.canvas.renderAll();
-  },
+    loadState(json) {
+      this.canvas.loadFromJSON(json, this.canvas.renderAll.bind(this.canvas));
+    },
     sendMessage() {
       if (this.chatMessage.trim()) {
-        this.socket.emit('chatMessage', { text: this.chatMessage, room: this.room });
+        const message = {
+          id: Date.now(),
+          text: this.chatMessage,
+          userId: this.userId,
+          userName: this.userName,
+        };
+        this.socket.emit('chatMessage', message);
         this.chatMessage = '';
       }
     },
-    updateCanvas() {
-      this.history.push(this.canvas.toJSON());
-      this.historyIndex = this.history.length - 1;
-    },
-    sendCanvasData(type, e) {
-        const obj = e.target ? e.target.toObject(['id']) : null;
-        if (obj) {
-            this.socket.emit('drawing', {
-                type,
-                object: obj,
-                room: this.room,
-            });
-        } else {
-            console.error('Object is not defined');
-        }
-    },
-  },
+   
+
+    renderUsers() {
+  // Clear previous cursors
+  this.canvas.getObjects().forEach(obj => {
+    if (obj.type === 'circle' && obj.isCursor) {
+      this.canvas.remove(obj);
+    }
+  });
+
+  // Draw cursors for all users
+  Object.keys(this.users).forEach(userId => {
+    const { x, y } = this.users[userId];
+    const cursor = new fabric.Circle({
+      left: x,
+      top: y,
+      radius: 5,
+      fill: 'red',
+      stroke: 'black',
+      strokeWidth: 1,
+      isCursor: true,
+      id: `cursor_${userId}`,
+      selectable: false
+    });
+
+    this.canvas.add(cursor);
+  });
+
+  this.canvas.renderAll();
+}
+
+}
+
+  
 };
 </script>
 

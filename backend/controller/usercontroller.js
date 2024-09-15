@@ -48,8 +48,10 @@ exports.SignIn = async (req, res) => {
       if (!isMatch) {
           return res.status(401).json({ message: 'Invalid credentials' });
       }
-
-   
+      req.session.userName = user.name;
+      req.session.userId = user._id;
+      console.log(`name is ${req.session.userName} and userId is ${req.session.userId}`)
+      req.session.save();
       const token = jwt.sign(
         { userId: user._id, email: user.email },
         'yourSecretKey', 
