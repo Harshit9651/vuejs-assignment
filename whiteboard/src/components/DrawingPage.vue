@@ -10,7 +10,6 @@
       <button class="toolbar-button" @click="setDrawingMode('text')">Text</button>
       <button class="toolbar-button" @click="undo">Undo</button>
       <button class="toolbar-button" @click="redo">Redo</button>
-     
       <button class="toolbar-button" @click="downloadCanvas">Download Canvas</button>
       <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none;" />
     </div>
@@ -23,9 +22,9 @@
           <div
             v-for="message in chatMessages"
             :key="message.id"
-            :class="{'chat-message sender': message.user === 'User', 'chat-message receiver': message.user !== 'User'}"
+            :class="{'chat-message sender': message.sender === userId, 'chat-message receiver': message.sender !== userId}"
           >
-            <strong>{{ message.user }}:</strong> {{ message.text }}
+            <strong>{{ message.userName }}:</strong> {{ message.text }}
           </div>
         </div>
         <div class="chat-input">
@@ -36,6 +35,7 @@
     </div>
   </div>
 </template>
+
 <script>
 import { io } from 'socket.io-client';
 import * as fabric from 'fabric';
@@ -46,7 +46,7 @@ export default {
     return {
       socket: null,
       canvas: null,
-      room: '', // This should be a string representing the room name
+      room: '',
       strokeColor: '#000000',
       drawingMode: 'pencil',
       backgroundColor: '#ffffff',
@@ -56,85 +56,100 @@ export default {
       chatMessages: [],
       userId: 'User_' + Math.random().toString(36).substr(2, 9), // Random user ID
       userName: 'User',
-      users: {}, // Store other users' cursors and names
+      users: {},
     };
-  },
-  mounted() {
-    this.socket = io('http://localhost:3000', {
-      transports: ['websocket', 'polling'],
-    });
+  },mounted() {
+  this.socket = io('http://localhost:3000', {
+    transports: ['websocket', 'polling'],
+  });
 
-    this.socket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err);
-    });
+  this.socket.on('connect_error', (err) => {
+    console.error('Socket connection error:', err);
+  });
 
-    this.canvas = new fabric.Canvas('canvas', {
-      width: 800,
-      height: 500,
-      backgroundColor: 'white',
-      isDrawingMode: true,
-    });
+  // Authenticate the user
+  this.socket.emit('authenticate', { userId: this.userId, userName: this.userName });
 
-    this.canvas.freeDrawingBrush = new fabric.PencilBrush(this.canvas);
-    this.canvas.freeDrawingBrush.color = this.strokeColor;
-    this.canvas.freeDrawingBrush.width = 2;
+  this.canvas = new fabric.Canvas('canvas', {
+    width: 800,
+    height: 500,
+    backgroundColor: 'white',
+    isDrawingMode: true,
+  });
 
-    // Listen for other users' drawing movements
-    this.socket.on('drawing', (data) => {
-      if (data && data.type && data.object) {
-        fabric.util.enlivenObjects([data.object], (objects) => {
-          objects.forEach((obj) => {
-            if (data.type === 'object:added') {
-              this.canvas.add(obj);
-            } else if (data.type === 'object:modified') {
-              const existingObj = this.canvas.getObjects().find(o => o.id === data.object.id);
-              if (existingObj) {
-                existingObj.set(obj);
-              }
+  this.canvas.freeDrawingBrush = new fabric.PencilBrush(this.canvas);
+  this.canvas.freeDrawingBrush.color = this.strokeColor;
+  this.canvas.freeDrawingBrush.width = 2;
+
+  // Listen for other users' drawing movements
+  this.socket.on('drawing', (data) => {
+    if (data && data.type && data.object) {
+      fabric.util.enlivenObjects([data.object], (objects) => {
+        objects.forEach((obj) => {
+          if (data.type === 'object:added') {
+            this.canvas.add(obj);
+          } else if (data.type === 'object:modified') {
+            const existingObj = this.canvas.getObjects().find(o => o.id === data.object.id);
+            if (existingObj) {
+              existingObj.set(obj);
             }
-            this.canvas.renderAll();
-          });
+          }
+          this.canvas.renderAll();
         });
-      }
-    });
+      });
+    }
+  });
 
-    // Listen for cursor movements of other users
-    this.socket.on('mouseMove', (data) => {
-      if (data.userId !== this.userId) {
-        this.users[data.userId] = {
-          x: data.x,
-          y: data.y,
-          userName: data.userName,
-        };
-        this.renderUsers();
-      }
-    });
+  // Listen for cursor movements of other users
+  this.socket.on('mouseMove', (data) => {
+    if (data.userId !== this.userId) {
+      this.users[data.userId] = {
+        x: data.x,
+        y: data.y,
+        userName: data.userName,
+      };
+    }
+  });
 
-    // Receive chat messages
-    this.socket.on('chatMessage', (messageData) => {
-      this.chatMessages.push(messageData);
-    });
+  // Listen for chat messages
+  this.socket.on('chatMessage', (message) => {
+    this.chatMessages.push(message);
+  });
 
-    // Emit drawing data when object is modified or added
-    this.canvas.on('object:modified', (e) => this.sendCanvasData('object:modified', e));
-    this.canvas.on('object:added', (e) => this.sendCanvasData('object:added', e));
+  // Listen for users in the room
+  this.socket.on('usersInRoom', (data) => {
+    this.users = data.users.reduce((acc, user) => {
+      acc[user.userId] = { userName: user.userName };
+      return acc;
+    }, {});
+  });
 
-    // Track mouse movement and broadcast
-    this.canvas.on('mouse:move', (e) => {
-      if (e.pointer) {
-        this.socket.emit('mouseMove', {
-          x: e.pointer.x,
-          y: e.pointer.y,
-          userId: this.userId,
-          userName: this.userName,
-          room: this.room,
-        });
-      }
-    });
+  // Emit drawing data when object is modified or added
+  this.canvas.on('object:modified', (e) => this.sendCanvasData('object:modified', e));
+  this.canvas.on('object:added', (e) => this.sendCanvasData('object:added', e));
 
-    this.saveState();
-  },
+  // Track mouse movement and broadcast
+  this.canvas.on('mouse:move', (e) => {
+    if (e.pointer) {
+      this.socket.emit('mouseMove', {
+        x: e.pointer.x,
+        y: e.pointer.y,
+        userId: this.userId,
+        userName: this.userName,
+        room: this.room,
+      });
+    }
+  });
+
+  // Save initial state
+  this.saveState();
+},
   methods: {
+    joinRoom() {
+      if (this.room) {
+        this.socket.emit('joinRoom', this.room);
+      }
+    },
     setDrawingMode(mode) {
       this.drawingMode = mode;
       if (mode === 'pencil') {
@@ -149,8 +164,7 @@ export default {
         this.addShape(mode);
       }
       this.saveState();
-    },
-    addShape(shape) {
+    }, addShape(shape) {
       let obj;
       switch (shape) {
         case 'rectangle':
@@ -212,26 +226,18 @@ export default {
       this.saveState();
       this.sendCanvasData('object:added', { object: text });
     },
-    uploadImage() {
-      this.$refs.fileInput.click();
-    },
     handleFileUpload(event) {
       const file = event.target.files[0];
       if (file) {
         const reader = new FileReader();
         reader.onload = (e) => {
-          const dataURL = e.target.result;
-          fabric.Image.fromURL(dataURL, (img) => {
-            this.canvas.setBackgroundImage(
-              img,
-              this.canvas.renderAll.bind(this.canvas),
-              {
-                scaleX: this.canvas.width / img.width,
-                scaleY: this.canvas.height / img.height,
-              }
-            );
-            this.saveState();
-          });
+          const imgElement = document.createElement('img');
+          imgElement.src = e.target.result;
+          imgElement.onload = () => {
+            const imgInstance = new fabric.Image(imgElement);
+            this.canvas.add(imgInstance);
+            this.canvas.renderAll();
+          };
         };
         reader.readAsDataURL(file);
       }
@@ -246,14 +252,7 @@ export default {
       link.download = 'canvas.png';
       link.click();
     },
-    joinRoom() {
-      if (typeof this.room === 'string') {
-        this.socket.emit('joinRoom', this.room); // Emit the room name directly as a string
-      } else {
-        console.error('Invalid room name');
-      }
-    },
-    sendCanvasData(type, e) {
+    asData(type, e) {
   const obj = e.target ? e.target.toObject(['id']) : null;
   if (obj) {
     this.socket.emit('drawing', {
@@ -345,21 +344,34 @@ export default {
     this.canvas.renderAll();
   },
     sendMessage() {
-      if (this.chatMessage.trim() !== '') {
-        const messageData = {
-          text: this.chatMessage,
-          user: this.userName,
-          room: this.room,
-        };
-        this.socket.emit('chatMessage', messageData);
-        this.chatMessages.push(messageData);
+      if (this.chatMessage.trim()) {
+        this.socket.emit('chatMessage', { text: this.chatMessage, room: this.room });
         this.chatMessage = '';
       }
+    },
+    updateCanvas() {
+      this.history.push(this.canvas.toJSON());
+      this.historyIndex = this.history.length - 1;
+    },
+    sendCanvasData(type, e) {
+        const obj = e.target ? e.target.toObject(['id']) : null;
+        if (obj) {
+            this.socket.emit('drawing', {
+                type,
+                object: obj,
+                room: this.room,
+            });
+        } else {
+            console.error('Object is not defined');
+        }
     },
   },
 };
 </script>
 
+<style>
+/* Add styles for your whiteboard, toolbar, chat messages, etc. */
+</style>
 
 <style scoped>
 .whiteboard-container {

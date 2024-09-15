@@ -1,12 +1,17 @@
 const express = require('express');
-const app = express();
 const http = require('http');
 const { Server } = require('socket.io');
 const dotenv = require('dotenv');
 const UserRoute = require('./routes/userroutes');
-const bodyparser = require('body-parser')
-require('./connections/connection')
+const ChatRoute = require('./routes/chatroutes');
+const bodyparser = require('body-parser');
+require('./connections/connection');
 const cors = require('cors');
+const Message = require('./models/chatmodel'); 
+
+dotenv.config();
+
+const app = express();
 app.use(cors({
   origin: 'http://localhost:8080',
   methods: ['GET', 'POST', 'PUT', 'DELETE'], 
@@ -14,22 +19,27 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'], 
 }));
 
-dotenv.config();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/User', UserRoute);
+app.use('/Chat', ChatRoute);
 
-app.use(express.json()); 
-app.use(express.urlencoded({ extended: true })); 
-app.use('/User',UserRoute);
 const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-
 
 const usersInRoom = {};
 const userCursorPositions = {};
 
 io.on('connection', (socket) => {
   console.log('A user connected', socket.id);
+
+  // Handle user authentication
+  socket.on('authenticate', (userData) => {
+    socket.userName = userData.userName;
+    socket.userId = userData.userId;
+  });
 
   // Handle joining a room
   socket.on('joinRoom', (room) => {
@@ -53,13 +63,13 @@ io.on('connection', (socket) => {
     if (!usersInRoom[room].includes(socket.id)) {
       usersInRoom[room].push(socket.id);
     }
-    io.to(room).emit('usersInRoom', usersInRoom[room]);
+    io.to(room).emit('usersInRoom', { users: usersInRoom[room], userName: socket.userName });
   });
 
   // Handle mouse movement
   socket.on('mouseMove', (data) => {
     if (data.room) {
-      userCursorPositions[data.userId] = { x: data.x, y: data.y, userName: data.userName };
+      userCursorPositions[socket.userId] = { x: data.x, y: data.y, userName: socket.userName };
       io.to(data.room).emit('mouseMove', { ...data, users: userCursorPositions });
     }
   });
@@ -72,9 +82,16 @@ io.on('connection', (socket) => {
   });
 
   // Handle chat messages
-  socket.on('chatMessage', (msg) => {
+  socket.on('chatMessage', async (messageData) => {
     if (socket.room) {
-      io.to(socket.room).emit('chatMessage', { sender: socket.id, text: msg.text });
+      try {
+        const message = new Message({ ...messageData, userName: socket.userName });
+        console.log(await message.save());
+
+        io.to(socket.room).emit('chatMessage', { sender: socket.userId, text: messageData.text, userName: socket.userName });
+      } catch (error) {
+        console.error('Error saving message:', error);
+      }
     }
   });
 
@@ -89,10 +106,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (socket.room) {
       usersInRoom[socket.room] = usersInRoom[socket.room].filter(id => id !== socket.id);
-      io.to(socket.room).emit('usersInRoom', usersInRoom[socket.room]);
+      io.to(socket.room).emit('usersInRoom', { users: usersInRoom[socket.room], userName: socket.userName });
 
       // Clean up user cursor position
-      delete userCursorPositions[socket.id];
+      delete userCursorPositions[socket.userId];
       io.to(socket.room).emit('mouseMove', { users: userCursorPositions });
     }
     console.log('Client disconnected', socket.id);
@@ -101,4 +118,5 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
+  
 });
