@@ -84,6 +84,7 @@ export default {
           sessionStorage.setItem('authToken', response.data.token); 
           this.flashMessage = response.data.message || 'Sign-in successful!';
           this.isSuccess = true;
+          this.$router.push('/drawing');
         } catch (error) {
           if (error.response) {
             this.flashMessage = error.response.data.message || 'Sign-in failed.';
