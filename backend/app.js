@@ -1,16 +1,30 @@
 const express = require('express');
+const app = express();
 const http = require('http');
 const { Server } = require('socket.io');
 const dotenv = require('dotenv');
+const UserRoute = require('./routes/userroutes');
+const bodyparser = require('body-parser')
+require('./connections/connection')
+const cors = require('cors');
+app.use(cors({
+  origin: 'http://localhost:8080',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], 
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'], 
+}));
+
 dotenv.config();
 
-const app = express();
+app.use(express.json()); 
+app.use(express.urlencoded({ extended: true })); 
+app.use('/User',UserRoute);
 const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 
-// In-memory storage for room users and cursor positions
+
 const usersInRoom = {};
 const userCursorPositions = {};
 

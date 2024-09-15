@@ -3,6 +3,6 @@ const router = express.Router();
 const { validateUser } = require('../middleware/validator-checker'); 
 const UserController = require("../controller/usercontroller")
 router.post('/SignUp',validateUser,UserController.SignUp);
-router.get('/SignIn',UserController.SignIn);
+router.post('/SignIn',UserController.SignIn);
 
 module.exports = router;

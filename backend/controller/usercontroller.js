@@ -1,5 +1,6 @@
 const User = require('../models/usermodel');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 
 exports.SignUp  = async(req,res)=>{
@@ -31,6 +32,7 @@ exports.SignUp  = async(req,res)=>{
 }
 
 exports.SignIn = async (req, res) => {
+  console.log('hello')
   const { email, password } = req.body;
 
   console.log(email,password)
@@ -48,7 +50,17 @@ exports.SignIn = async (req, res) => {
       }
 
    
-      res.status(200).json({ message: 'Sign-in successful', user: { email: user.email } });
+      const token = jwt.sign(
+        { userId: user._id, email: user.email },
+        'yourSecretKey', 
+        { expiresIn: '1h' } 
+    );
+
+    res.status(200).json({ 
+        message: 'Sign-in successful', 
+        token, 
+        user: { email: user.email, name: user.name } 
+    });
 
   } catch (error) {
   

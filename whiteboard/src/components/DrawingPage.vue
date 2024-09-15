@@ -8,11 +8,9 @@
       <button class="toolbar-button" @click="setDrawingMode('circle')">Circle</button>
       <button class="toolbar-button" @click="setDrawingMode('line')">Line</button>
       <button class="toolbar-button" @click="setDrawingMode('text')">Text</button>
-      <input type="color" v-model="strokeColor" class="color-picker" />
-      <button class="toolbar-button" @click="uploadImage">Upload Image</button>
       <button class="toolbar-button" @click="undo">Undo</button>
       <button class="toolbar-button" @click="redo">Redo</button>
-      <input type="color" v-model="backgroundColor" class="color-picker" />
+     
       <button class="toolbar-button" @click="downloadCanvas">Download Canvas</button>
       <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none;" />
     </div>

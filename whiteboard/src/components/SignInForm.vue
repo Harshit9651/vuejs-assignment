@@ -81,6 +81,7 @@ export default {
       if (!this.errors.email && !this.errors.password) {
         try {
           const response = await axios.post('http://localhost:3000/User/SignIn', this.user);
+          sessionStorage.setItem('authToken', response.data.token); 
           this.flashMessage = response.data.message || 'Sign-in successful!';
           this.isSuccess = true;
         } catch (error) {
