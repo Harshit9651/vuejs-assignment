@@ -108,14 +108,14 @@ export default {
   },
 };
 </script>
-
 <style scoped>
-.auth-wrapper {
+ 
+ .auth-wrapper {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background-color: #ffffff;
+  background-color: #f7f7f7;
 }
 
 .auth-container {
@@ -125,6 +125,7 @@ export default {
   border-radius: 15px;
   background-color: #fff;
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box; /* Ensure padding is included in the width */
 }
 
 h2 {
@@ -150,6 +151,7 @@ h2 {
   border: 1px solid #ccc;
   border-radius: 8px;
   font-size: 16px;
+  box-sizing: border-box; /* Ensure padding is included in the width */
 }
 
 .error {
@@ -193,4 +195,6 @@ button:hover {
 .flash-message.error {
   background-color: #dc3545; /* Red */
 }
+
+
 </style>
