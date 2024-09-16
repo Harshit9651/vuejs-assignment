@@ -53,12 +53,16 @@ export default {
       historyIndex: -1,
       chatMessage: '',
       chatMessages: [],
-      userId: 'User_' + Math.random().toString(36).substr(2, 9), // Random user ID
+      userId: 'User_' + Math.random().toString(36).substr(2, 9),
       userName: 'User',
       users: {},
     };
   },
   mounted() {
+    const userNameInput = prompt("Please enter your name:", "User");
+  if (userNameInput) {
+    this.userName = userNameInput;
+  }
   this.socket = io('http://localhost:3000', {
     transports: ['websocket', 'polling'],
   });
@@ -81,7 +85,7 @@ export default {
   this.canvas.freeDrawingBrush.color = this.strokeColor;
   this.canvas.freeDrawingBrush.width = 2;
 
-  // Listen for other users' drawing movements
+
   this.socket.on('drawing', (data) => {
     if (data && data.type && data.object) {
       fabric.util.enlivenObjects([data.object], (objects) => {
@@ -100,7 +104,7 @@ export default {
     }
   });
 
-  // Listen for cursor movements of other users
+
   this.socket.on('mouseMove', (data) => {
     if (data.userId !== this.userId) {
       this.users[data.userId] = {
@@ -108,16 +112,15 @@ export default {
         y: data.y,
         userName: data.userName,
       };
-      this.renderUsers(); // Update the canvas with cursor positions
+      this.renderUsers();
     }
   });
 
-  // Listen for chat messages
   this.socket.on('chatMessage', (message) => {
     this.chatMessages.push(message);
   });
 
-  // Listen for users in the room
+ 
   this.socket.on('usersInRoom', (data) => {
     this.users = data.users.reduce((acc, user) => {
       acc[user.userId] = { userName: user.userName };
@@ -125,7 +128,7 @@ export default {
     }, {});
   });
 
-  // Emit drawing data when object is modified or added
+
   this.canvas.on('object:modified', (e) => this.sendCanvasData('object:modified', e));
   this.canvas.on('object:added', (e) => this.sendCanvasData('object:added', e));
 
@@ -150,6 +153,9 @@ export default {
     joinRoom() {
       if (this.room) {
         this.socket.emit('joinRoom', this.room);
+        alert(`You have successfully joined the room: ${this.room}`);
+      }else{
+        alert(`some error happend when you joined this room`)
       }
     },
     setDrawingMode(mode) {
@@ -305,204 +311,67 @@ export default {
         this.chatMessage = '';
       }
     },
-   
-
     renderUsers() {
-  // Clear previous cursors
+
+  const colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'cyan', 'magenta', 'lime'];
+
+ 
   this.canvas.getObjects().forEach(obj => {
-    if (obj.type === 'circle' && obj.isCursor) {
+    if (obj.isCursor || obj.isUserName) {
       this.canvas.remove(obj);
     }
   });
 
-  // Draw cursors for all users
-  Object.keys(this.users).forEach(userId => {
-    const { x, y } = this.users[userId];
+
+  Object.keys(this.users).forEach((userId, index) => {
+    const { x, y, userName = 'Unnamed User' } = this.users[userId]; 
+   const cursorColor = colors[index % colors.length];
+
+ 
+    if (typeof x === 'undefined' || typeof y === 'undefined') {
+      console.warn(`User ${userId} does not have valid cursor coordinates.`);
+      return;
+    }
+
+    
     const cursor = new fabric.Circle({
       left: x,
       top: y,
       radius: 5,
-      fill: 'red',
+      fill: cursorColor, 
       stroke: 'black',
       strokeWidth: 1,
-      isCursor: true,
-      id: `cursor_${userId}`,
       selectable: false
     });
 
+    // Add the user's name as a text object above the cursor
+    const userNameText = new fabric.Text(userName, {
+      left: x - 20,
+      top: y - 20, 
+      fontSize: 14,
+      fill: cursorColor, 
+      selectable: false,
+      isUserName: true ,
+      strokeWidth: 1,
+      isCursor: true,
+  
+    });
     this.canvas.add(cursor);
+    this.canvas.add(userNameText);
   });
 
   this.canvas.renderAll();
 }
 
-}
+    
+  }}
 
-  
-};
+  import '../assets/css/drawingstyle.css';
 </script>
 
 <style>
-/* Add styles for your whiteboard, toolbar, chat messages, etc. */
+
 </style>
 
 <style scoped>
-.whiteboard-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-}
-
-.toolbar {
-  margin-bottom: 10px;
-  display: flex;
-  justify-content: space-around;
-  width: 100%;
-  background-color: #f4f4f4;
-  padding: 10px;
-  border-radius: 10px;
-}
-
-.toolbar-button {
-  margin: 0 5px;
-  padding: 8px 15px;
-  background-color: #4CAF50;
-  color: white;
-  border: none;
-  cursor: pointer;
-  border-radius: 5px;
-  transition: background-color 0.3s;
-}
-
-.toolbar-button:hover {
-  background-color: #45a049;
-}
-
-.color-picker {
-  margin-left: 5px;
-}
-
-.content {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  width: 100%;
-}
-
-#canvas {
-  border: 1px solid #ddd;
-  margin-right: 20px;
-  border-radius: 10px;
-  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
-}
-
-.chat-container {
-  width: 350px;
-  max-height: 600px;
-  border: 1px solid #ddd;
-  border-radius: 20px;
-  display: flex;
-  flex-direction: column;
-  background-color: #ffffff;
-  box-shadow: 0px 8px 16px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-}
-
-.chat-header {
-  background-color: #4CAF50;
-  color: white;
-  padding: 15px;
-  text-align: center;
-  font-weight: bold;
-  border-radius: 20px 20px 0 0;
-  font-size: 18px;
-}
-
-.chat-messages {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.chat-message {
-  max-width: 80%;
-  padding: 10px 15px;
-  border-radius: 20px;
-  font-size: 14px;
-  word-wrap: break-word;
-  position: relative;
-  line-height: 1.5;
-}
-
-.chat-message::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  width: 0;
-  height: 0;
-  border-style: solid;
-}
-
-.chat-message.sender {
-  align-self: flex-end;
-  background-color: #dcf8c6;
-  color: #333;
-  border-radius: 20px 20px 0 20px;
-}
-
-.chat-message.sender::before {
-  border-width: 10px 10px 0 0;
-  border-color: #dcf8c6 transparent transparent transparent;
-  right: -10px;
-  top: 10px;
-}
-
-.chat-message.receiver {
-  align-self: flex-start;
-  background-color: #f1f0f0;
-  color: #333;
-  border-radius: 20px 20px 20px 0;
-}
-
-.chat-message.receiver::before {
-  border-width: 10px 0 0 10px;
-  border-color: #f1f0f0 transparent transparent transparent;
-  left: -10px;
-  top: 10px;
-}
-
-.chat-input {
-  display: flex;
-  padding: 10px;
-  background-color: #f4f4f4;
-  border-radius: 0 0 20px 20px;
-}
-
-.chat-input input {
-  flex-grow: 1;
-  padding: 10px;
-  font-size: 14px;
-  border-radius: 20px;
-  border: 1px solid #ddd;
-  outline: none;
-  margin-right: 10px;
-}
-
-.chat-input button {
-  padding: 10px 15px;
-  background-color: #4CAF50;
-  color: white;
-  border: none;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: background-color 0.3s;
-}
-
-.chat-input button:hover {
-  background-color: #45a049;
-}
 </style>

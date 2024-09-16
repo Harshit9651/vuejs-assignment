@@ -175,7 +175,6 @@ button:hover {
   background-color: #218838;
 }
 
-/* Flash message styles */
 .flash-message {
   position: fixed;
   top: 10px;

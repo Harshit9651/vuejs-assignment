@@ -30,43 +30,50 @@ exports.SignUp  = async(req,res)=>{
       res.status(500).send('Server error');
     }
 }
-
 exports.SignIn = async (req, res) => {
-  console.log('hello')
   const { email, password } = req.body;
 
-  console.log(email,password)
+  console.log(email, password);
   try {
-      const user = await User.findOne({ email });
-      
-      if (!user) {
-          return res.status(404).json({ message: 'User not found' });
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Set session data
+    req.session.userName = user.name;
+    req.session.userId = user._id;
+
+    // Save session and ensure it is saved before responding
+    req.session.save((err) => {
+      if (err) {
+        console.error('Error saving session:', err);
+        return res.status(500).json({ message: 'Server error' });
       }
 
-      const isMatch = await bcrypt.compare(password, user.password);
-
-      if (!isMatch) {
-          return res.status(401).json({ message: 'Invalid credentials' });
-      }
-      req.session.userName = user.name;
-      req.session.userId = user._id;
-      console.log(`name is ${req.session.userName} and userId is ${req.session.userId}`)
-      req.session.save();
+      // Generate token after the session is saved
       const token = jwt.sign(
         { userId: user._id, email: user.email },
         'yourSecretKey', 
-        { expiresIn: '1h' } 
-    );
+        { expiresIn: '1h' }
+      );
 
-    res.status(200).json({ 
+      // Send response
+      res.status(200).json({ 
         message: 'Sign-in successful', 
         token, 
         user: { email: user.email, name: user.name } 
+      });
     });
-
   } catch (error) {
-  
-      console.error('Error during sign-in:', error);
-      res.status(500).json({ message: 'Server error' });
+    console.error('Error during sign-in:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 };
