@@ -311,57 +311,70 @@ export default {
         this.chatMessage = '';
       }
     },
-    renderUsers() {
-
-  const colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'cyan', 'magenta', 'lime'];
-
- 
-  this.canvas.getObjects().forEach(obj => {
-    if (obj.isCursor || obj.isUserName) {
-      this.canvas.remove(obj);
-    }
-  });
-
-
-  Object.keys(this.users).forEach((userId, index) => {
-    const { x, y, userName = 'Unnamed User' } = this.users[userId]; 
-   const cursorColor = colors[index % colors.length];
-
- 
-    if (typeof x === 'undefined' || typeof y === 'undefined') {
-      console.warn(`User ${userId} does not have valid cursor coordinates.`);
-      return;
-    }
-
-    
-    const cursor = new fabric.Circle({
-      left: x,
-      top: y,
-      radius: 5,
-      fill: cursorColor, 
-      stroke: 'black',
-      strokeWidth: 1,
-      selectable: false
-    });
-
-    // Add the user's name as a text object above the cursor
-    const userNameText = new fabric.Text(userName, {
-      left: x - 20,
-      top: y - 20, 
-      fontSize: 14,
-      fill: cursorColor, 
-      selectable: false,
-      isUserName: true ,
-      strokeWidth: 1,
-      isCursor: true,
   
-    });
-    this.canvas.add(cursor);
-    this.canvas.add(userNameText);
-  });
+    renderUsers() {
+    const colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'cyan', 'magenta', 'lime'];
 
-  this.canvas.renderAll();
-}
+    // Remove previous cursor indicators and user names
+    this.canvas.getObjects().forEach(obj => {
+      if (obj.isCursor || obj.isUserName) {
+        this.canvas.remove(obj);
+      }
+    });
+
+    // Track cursor indicators
+    this.cursorIndicators = {}; // Initialize the cursorIndicators object
+
+    Object.keys(this.users).forEach((userId, index) => {
+      const { x, y, userName = 'Unnamed User' } = this.users[userId];
+      const cursorColor = colors[index % colors.length];
+
+      if (typeof x === 'undefined' || typeof y === 'undefined') {
+        console.warn(`User ${userId} does not have valid cursor coordinates.`);
+        return;
+      }
+
+      // Check if cursor indicator already exists for this user
+      let cursor = this.cursorIndicators[userId]?.cursor;
+      let userNameText = this.cursorIndicators[userId]?.userNameText;
+
+      if (!cursor) {
+        // Create new cursor and user name text if they don't exist
+        cursor = new fabric.Circle({
+          left: x,
+          top: y,
+          radius: 5,
+          fill: cursorColor,
+          stroke: 'black',
+          strokeWidth: 1,
+          selectable: false,
+          isCursor: true,
+        });
+
+        userNameText = new fabric.Text(userName, {
+          left: x - 20,
+          top: y - 20,
+          fontSize: 14,
+          fill: cursorColor,
+          selectable: false,
+          isUserName: true,
+          strokeWidth: 1,
+        });
+
+        this.canvas.add(cursor);
+        this.canvas.add(userNameText);
+
+        // Save to cursorIndicators object
+        this.cursorIndicators[userId] = { cursor, userNameText };
+      } else {
+        // Update existing cursor and user name text
+        cursor.set({ left: x, top: y });
+        userNameText.set({ left: x - 20, top: y - 20 });
+      }
+    });
+
+    this.canvas.renderAll();
+  },
 
     
   }}
