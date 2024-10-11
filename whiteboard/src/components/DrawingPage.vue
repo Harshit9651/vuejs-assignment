@@ -263,7 +263,9 @@ export default {
     },
     sendCanvasData(type, e) {
       const obj = e.target ? e.target.toObject(['id']) : null;
+      
       if (obj) {
+        console.log(obj);
         this.socket.emit('drawing', {
           type,
           object: obj,
